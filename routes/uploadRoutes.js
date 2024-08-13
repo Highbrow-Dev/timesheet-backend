@@ -1,20 +1,30 @@
 const express = require("express");
 const multer = require("multer");
-const path = require("path");
 const mongoose = require("mongoose");
-const File = require("../models/File"); // Import the File model
+const Grid = require("gridfs-stream");
+const { GridFsStorage } = require("multer-gridfs-storage");
 
 const router = express.Router();
 
-// Define storage for Multer
-const storage = multer.diskStorage({
-  destination: "./uploads/",
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname)); // Add a timestamp to the file name
+let gfs;
+mongoose.connection.once("open", () => {
+  gfs = Grid(mongoose.connection.db, mongoose.mongo);
+  gfs.collection("uploads");
+});
+
+// Create storage engine
+const storage = new GridFsStorage({
+  url: process.env.MONGO_URI,
+  options: { useUnifiedTopology: true },
+  file: (req, file) => {
+    return {
+      filename: Date.now() + "-" + file.originalname,
+      bucketName: "uploads",
+    };
   },
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({ storage });
 
 // Route to handle file upload
 router.post(
@@ -28,39 +38,40 @@ router.post(
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    if (!req.body.email) {
-      console.log("No email provided");
-      return res.status(400).json({ error: "No email provided" });
-    }
-
-    const newFile = new File({
-      filename: req.file.filename,
-      path: req.file.path,
-      userType: "employee", // Ensure only employees are allowed to upload
-      email: req.body.email, // Store the email of the user
+    res.status(201).json({
+      message: "File uploaded successfully",
+      file: {
+        filename: req.file.filename,
+        id: req.file.id,
+      },
     });
-
-    try {
-      await newFile.save();
-      console.log("File saved successfully:", newFile);
-      res
-        .status(201)
-        .json({ message: "File uploaded successfully", file: newFile });
-    } catch (error) {
-      console.log("Error saving file:", error);
-      res.status(500).json({ error: "Failed to save file" });
-    }
   }
 );
 
+// Route to get all uploaded files
 router.get("/screenshots", async (req, res) => {
-  try {
-    const files = await File.find({ userType: "employee" });
-    res.status(200).json({ files });
-  } catch (error) {
-    console.log("Error fetching files:", error);
-    res.status(500).json({ error: "Failed to fetch files" });
-  }
+  gfs.files.find({}).toArray((err, files) => {
+    if (!files || files.length === 0) {
+      return res.status(404).json({
+        message: "No files found",
+      });
+    }
+
+    return res.status(200).json(files);
+  });
+});
+
+// Route to retrieve a file by filename
+router.get("/screenshots/:filename", (req, res) => {
+  gfs.files.findOne({ filename: req.params.filename }, (err, file) => {
+    if (!file || file.length === 0) {
+      return res.status(404).json({ error: "No file found" });
+    }
+
+    // If the file exists, create a read stream and pipe it to the response
+    const readstream = gfs.createReadStream(file.filename);
+    readstream.pipe(res);
+  });
 });
 
 module.exports = router;

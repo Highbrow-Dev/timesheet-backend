@@ -17,5 +17,5 @@ mongoose
 
 app.use("/api", uploadRoutes); // Mount the upload routes under /api
 
-const PORT = process.env.PORT || 5001; // Ensure this matches your setup
+const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
